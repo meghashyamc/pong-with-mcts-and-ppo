@@ -3,13 +3,13 @@ Starting point of Simple/Complex Pong games when they are played by humans
 """
 
 import argparse
-from src.pong.base_game import BasePongGame
+from src.pong.game_factory import get_pong_game
 from src.pong import constants
 
 
 def main():
     """
-    Starting point of the Simple Pong game
+    Starting point of Pong game
     """
 
     parser = argparse.ArgumentParser(description="Play Pong game")
@@ -23,7 +23,7 @@ def main():
     )
 
     args = parser.parse_args()
-    game = BasePongGame.get_pong_game(env_name=args.env_name)
+    game = get_pong_game(env_name=args.env_name)()
     game.run()
 
 

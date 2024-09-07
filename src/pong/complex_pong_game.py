@@ -5,7 +5,7 @@ Functionality for combining the various parts of the Complex Pong game
 from typing import List, Tuple
 import pygame
 from src.pong import constants
-from src.pong.game_object import Paddle, Ball
+from src.pong.game_object import Paddle, Ball, Obstacle
 from src.models.pong import Direction
 from src.pong.base_game import BasePongGame
 
@@ -27,7 +27,7 @@ class ComplexPongGame(BasePongGame):
             self.screen = pygame.display.set_mode(
                 (constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT)
             )
-            pygame.display.set_caption(constants.SCREEN_CAPTION)
+            pygame.display.set_caption(constants.SCREEN_CAPTION_COMPLEX_PONG)
             self.clock = pygame.time.Clock()
             self.font = pygame.font.Font(None, constants.GAME_FONT_SIZE)
         else:
@@ -36,36 +36,68 @@ class ComplexPongGame(BasePongGame):
                 (constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT)
             )
 
-        self.paddle = Paddle.new()
+        self.paddle1 = Paddle.new(x=0, width=constants.SMALL_PADDLE_WIDTH)
+        self.paddle2 = Paddle.new(
+            x=constants.SCREEN_WIDTH // 2, width=constants.SMALL_PADDLE_WIDTH
+        )
         self.ball = Ball.new()
+        self.obstacle = Obstacle.new()
         self.reward = 0
         self.done = False
 
     def reset(self):
         """Reset the game state and return the initial state."""
-        self.paddle.reset()
+        self.paddle1.reset()
+        self.paddle2.reset()
         self.ball.reset()
+        self.obstacle.reset()
         self.reward = 0
         self.done = False
         return self._get_state()
 
-    def step(self, action) -> Tuple[List, float, bool]:
+    def step(self, action: int) -> Tuple[List, float, bool]:
         """
         Take a step in the environment.
 
         Args:
-            action (int): 0 for left, 1 for stay, 2 for right
+            action (int): 0 for left, left, 1 for stay, left, 2 for right, left
+            4 for left, stay, 5 for right, stay, 6 for right, stay
+            7 for left, right, 8 for right, right, 9 for right, right
 
         Returns:
             tuple: (next_state, reward, done)
         """
-        if action == 0:
-            self.paddle.move(Direction.LEFT)
-        elif action == 2:
-            self.paddle.move(Direction.RIGHT)
-        else:
-            self.paddle.move(Direction.STAYPUT)
 
+        match (action):
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_LEFT_PADDLE2_LEFT:
+                self.paddle1.move(Direction.LEFT)
+                self.paddle2.move(Direction.LEFT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_LEFT:
+                self.paddle1.move(Direction.STAYPUT)
+                self.paddle2.move(Direction.LEFT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_RIGHT_PADDLE2_LEFT:
+                self.paddle1.move(Direction.RIGHT)
+                self.paddle2.move(Direction.LEFT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_LEFT_PADDLE2_STAY:
+                self.paddle1.move(Direction.LEFT)
+                self.paddle2.move(Direction.STAYPUT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_STAY:
+                self.paddle1.move(Direction.STAYPUT)
+                self.paddle2.move(Direction.STAYPUT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_RIGHT_PADDLE2_STAY:
+                self.paddle1.move(Direction.RIGHT)
+                self.paddle2.move(Direction.STAYPUT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_LEFT_PADDLE2_RIGHT:
+                self.paddle1.move(Direction.LEFT)
+                self.paddle2.move(Direction.RIGHT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_RIGHT:
+                self.paddle1.move(Direction.STAYPUT)
+                self.paddle2.move(Direction.RIGHT)
+            case constants.COMPLEX_PONG_ACTION_PADDLE1_RIGHT_PADDLE2_RIGHT:
+                self.paddle1.move(Direction.RIGHT)
+                self.paddle2.move(Direction.RIGHT)
+            case _:
+                raise ValueError(f"Invalid action: {action}")
         self.update()
         next_state = self._get_state()
 
@@ -73,9 +105,12 @@ class ComplexPongGame(BasePongGame):
 
     def update(self):
         """Update game state."""
-        self.paddle.update(self.screen.get_rect())
+        self.paddle1.update(self.screen.get_rect(), self.paddle2)
+        self.paddle2.update(self.screen.get_rect(), self.paddle1)
         self.ball.update(self.screen.get_rect())
-        done, reward = self.ball.move(self.paddle)
+        self.obstacle.update(self.screen.get_rect())
+        self.obstacle.move()
+        done, reward = self.ball.move([self.paddle1, self.paddle2], self.obstacle)
         self.update_reward(reward)
         self.done = done
 
@@ -89,7 +124,10 @@ class ComplexPongGame(BasePongGame):
         """Get the default reward for an action."""
 
         return 1 - (
-            abs(self.ball.position.centerx - self.paddle.position.centerx)
+            min(
+                abs(self.ball.position.centerx - self.paddle1.position.centerx),
+                abs(self.ball.position.centerx - self.paddle2.position.centerx),
+            )
             / constants.SCREEN_WIDTH
         )
 
@@ -101,11 +139,13 @@ class ComplexPongGame(BasePongGame):
             list: [paddle_x, ball_x, ball_y, ball_velocity_x, ball_velocity_y]
         """
         return [
-            self.paddle.position.centerx / constants.SCREEN_WIDTH,
+            self.paddle1.position.centerx / constants.SCREEN_WIDTH,
+            self.paddle2.position.centerx / constants.SCREEN_WIDTH,
             self.ball.position.centerx / constants.SCREEN_WIDTH,
             self.ball.position.centery / constants.SCREEN_HEIGHT,
             self.ball.velocity.x / constants.SCREEN_WIDTH,
             self.ball.velocity.y / constants.SCREEN_WIDTH,
+            self.obstacle.position.centerx / constants.SCREEN_WIDTH,
         ]
 
     def render(self):
@@ -113,8 +153,10 @@ class ComplexPongGame(BasePongGame):
         if self.headless:
             return
         self.screen.fill(constants.BLACK)
-        pygame.draw.rect(self.screen, constants.WHITE, self.paddle.position)
+        pygame.draw.rect(self.screen, constants.WHITE, self.paddle1.position)
+        pygame.draw.rect(self.screen, constants.WHITE, self.paddle2.position)
         pygame.draw.ellipse(self.screen, constants.WHITE, self.ball.position)
+        pygame.draw.rect(self.screen, constants.WHITE, self.obstacle.position)
 
         reward_surface = self.font.render(
             f"reward: {self.reward}", True, constants.WHITE
@@ -135,12 +177,19 @@ class ComplexPongGame(BasePongGame):
                     return
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_LEFT:
-                        self.paddle.move(Direction.LEFT)
+                        self.paddle1.move(Direction.LEFT)
                     elif event.key == pygame.K_RIGHT:
-                        self.paddle.move(Direction.RIGHT)
+                        self.paddle1.move(Direction.RIGHT)
+                    if event.key == pygame.K_a:
+                        self.paddle2.move(Direction.LEFT)
+                    elif event.key == pygame.K_d:
+                        self.paddle2.move(Direction.RIGHT)
+
                 if event.type == pygame.KEYUP:
                     if event.key in (pygame.K_LEFT, pygame.K_RIGHT):
-                        self.paddle.move(Direction.STAYPUT)
+                        self.paddle1.move(Direction.STAYPUT)
+                    if event.key in (pygame.K_a, pygame.K_d):
+                        self.paddle2.move(Direction.STAYPUT)
 
             self.update()
             self.render()

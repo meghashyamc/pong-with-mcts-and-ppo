@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
 from matplotlib.axes._axes import Axes
-from src.pong.base_game import BasePongGame
+from src.pong.game_factory import get_pong_game
 from src.pong import constants as pong_constants
 from src.algorithms.PPO import PPO
 from src.logger.logger import logger
@@ -29,19 +29,6 @@ class PPOTrainer:
     The class to train the agent for the Simple Pong environment
     """
 
-    HAS_CONTINUOUS_ACTION_SPACE = False  # discrete action space
-    MAX_EPISODES = int(10000)
-    ACTION_STD = None  # constant std for action distribution (Multivariate Normal)
-    K_EPOCHS = 4  # update policy for K epochs
-    EPS_CLIP = 0.2  # clip parameter for PPO
-    GAMMA = 0.99  # discount factor
-    LR_ACTOR = 0.0003  # learning rate for actor network
-    LR_CRITIC = 0.0003  # learning rate for critic network
-    WINDOW_SIZE = 100  # Number of episodes to average over for various metrics
-    PADDLE_HITS_THRESHOLD = (
-        100  # Number of paddles hits to consider the environment solved
-    )
-
     def __init__(
         self,
         env_name: str,
@@ -49,7 +36,7 @@ class PPOTrainer:
         show_game_during_training: bool = False,
     ):
         # if headless = True, the game will be not be rendered
-        self.env = BasePongGame.get_pong_game(env_name)(
+        self.env = get_pong_game(env_name)(
             headless=(not show_game_during_training), reward_frequency=reward_frequency
         )
         self.reward_frequency = reward_frequency
@@ -58,13 +45,13 @@ class PPOTrainer:
         self.ppo_agent = PPO(
             constants.STATE_DIMS[env_name],
             constants.ACTION_DIMS[env_name],
-            self.LR_ACTOR,
-            self.LR_CRITIC,
-            self.GAMMA,
-            self.K_EPOCHS,
-            self.EPS_CLIP,
-            self.HAS_CONTINUOUS_ACTION_SPACE,
-            self.ACTION_STD,
+            constants.LR_ACTOR,
+            constants.LR_CRITIC,
+            constants.GAMMA,
+            constants.K_EPOCHS,
+            constants.EPS_CLIP,
+            constants.HAS_CONTINUOUS_ACTION_SPACE,
+            constants.ACTION_STD,
         )
 
         self._setup_result_paths()
@@ -92,7 +79,7 @@ class PPOTrainer:
         if show_visual_plot_during_training:
             fig, axes, line1, line2 = self._setup_plot()
 
-        for i_episode in range(self.MAX_EPISODES):
+        for i_episode in range(constants.MAX_EPISODES):
 
             state = self.env.reset()
             episode_reward = 0
@@ -211,8 +198,8 @@ class PPOTrainer:
         Returns True if the environment is solved.
         """
         avg_paddle_hits = (
-            np.mean(paddle_hits_history[-self.WINDOW_SIZE :])
-            if len(paddle_hits_history) >= self.WINDOW_SIZE
+            np.mean(paddle_hits_history[-constants.WINDOW_SIZE :])
+            if len(paddle_hits_history) >= constants.WINDOW_SIZE
             else 0
         )
         avg_paddle_hits_list.append(avg_paddle_hits)
@@ -222,10 +209,10 @@ class PPOTrainer:
 
         logger.info(
             "Average paddle hits over last %d episodes: %.2f",
-            self.WINDOW_SIZE,
+            constants.WINDOW_SIZE,
             avg_paddle_hits,
         )
-        return avg_paddle_hits >= self.PADDLE_HITS_THRESHOLD
+        return avg_paddle_hits >= constants.PADDLE_HITS_THRESHOLD
 
     def _draw_plot(self, fig, ax):
 
@@ -263,8 +250,8 @@ class PPOTrainer:
         Log the average reward and show the plot if needed
         """
         avg_reward = (
-            np.mean(rewards[-self.WINDOW_SIZE :])
-            if len(rewards) >= self.WINDOW_SIZE
+            np.mean(rewards[-constants.WINDOW_SIZE :])
+            if len(rewards) >= constants.WINDOW_SIZE
             else 0
         )
         avg_rewards.append(avg_reward)
@@ -273,7 +260,7 @@ class PPOTrainer:
             line.set_ydata(avg_rewards)
         logger.info(
             "Average reward over last %d episodes: %d",
-            self.WINDOW_SIZE,
+            constants.WINDOW_SIZE,
             avg_reward,
         )
         return float(avg_reward)

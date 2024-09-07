@@ -27,7 +27,7 @@ class SimplePongGame(BasePongGame):
             self.screen = pygame.display.set_mode(
                 (constants.SCREEN_WIDTH, constants.SCREEN_HEIGHT)
             )
-            pygame.display.set_caption(constants.SCREEN_CAPTION)
+            pygame.display.set_caption(constants.SCREEN_CAPTION_SIMPLE_PONG)
             self.clock = pygame.time.Clock()
             self.font = pygame.font.Font(None, constants.GAME_FONT_SIZE)
         else:
@@ -49,7 +49,7 @@ class SimplePongGame(BasePongGame):
         self.done = False
         return self._get_state()
 
-    def step(self, action) -> Tuple[List, float, bool]:
+    def step(self, action: int) -> Tuple[List, float, bool]:
         """
         Take a step in the environment.
 
@@ -59,12 +59,14 @@ class SimplePongGame(BasePongGame):
         Returns:
             tuple: (next_state, reward, done)
         """
-        if action == 0:
-            self.paddle.move(Direction.LEFT)
-        elif action == 2:
-            self.paddle.move(Direction.RIGHT)
-        else:
-            self.paddle.move(Direction.STAYPUT)
+
+        match (action):
+            case constants.SIMPLE_PONG_ACTION_PADDLE_LEFT:
+                self.paddle.move(Direction.LEFT)
+            case constants.SIMPLE_PONG_ACTION_PADDLE_RIGHT:
+                self.paddle.move(Direction.RIGHT)
+            case constants.SIMPLE_PONG_ACTION_PADDLE_STAY:
+                self.paddle.move(Direction.STAYPUT)
 
         self.update()
         next_state = self._get_state()
@@ -75,7 +77,7 @@ class SimplePongGame(BasePongGame):
         """Update game state."""
         self.paddle.update(self.screen.get_rect())
         self.ball.update(self.screen.get_rect())
-        done, reward = self.ball.move(self.paddle)
+        done, reward = self.ball.move([self.paddle])
         self.update_reward(reward)
         self.done = done
 
