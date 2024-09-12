@@ -5,7 +5,7 @@ Functionality to visualize trained agents playing Pong games
 
 import argparse
 import pygame
-from src.algorithms.PPO import PPO
+from src.algorithms.ppo import PPO
 from src.logger.logger import logger
 from src.train import constants
 from src.pong import constants as pong_constants
@@ -19,8 +19,8 @@ class TrainedPlayer:
 
     ARG_MODEL_PATH = "model_path"
 
-    def __init__(self, env_name: str, model_path: str):
-        self.env = get_pong_game(env_name)()
+    def __init__(self, env_name: str, reward_frequency: str, model_path: str):
+        self.env = get_pong_game(env_name)(reward_frequency=reward_frequency)
         self.ppo_agent = PPO(
             constants.STATE_DIMS[env_name],
             constants.ACTION_DIMS[env_name],
@@ -89,8 +89,17 @@ if __name__ == "__main__":
         help="Path to the trained model",
     )
 
+    parser.add_argument(
+        f"--{constants.ARG_REWARD_FREQUENCY}",
+        type=str,
+        default=pong_constants.FREQUENCY_FREQUENT,
+        help="Reward frequency",
+    )
+
     args = parser.parse_args()
     trained_player = TrainedPlayer(
-        env_name=args.env_name, model_path=f"trained/{args.env_name}/{args.model_path}"
+        env_name=args.env_name,
+        reward_frequency=args.reward_frequency,
+        model_path=f"trained/{args.env_name}/{args.model_path}",
     )
     trained_player.play()

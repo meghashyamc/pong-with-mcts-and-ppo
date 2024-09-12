@@ -45,7 +45,7 @@ class ComplexPongGame(BasePongGame):
         self.reward = 0
         self.done = False
 
-    def reset(self):
+    def reset(self) -> List[float]:
         """Reset the game state and return the initial state."""
         self.paddle1.reset()
         self.paddle2.reset()
@@ -131,7 +131,7 @@ class ComplexPongGame(BasePongGame):
             / constants.SCREEN_WIDTH
         )
 
-    def _get_state(self):
+    def _get_state(self) -> List[float]:
         """
         Get the current state of the game.
 

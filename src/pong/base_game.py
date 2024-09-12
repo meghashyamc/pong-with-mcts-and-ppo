@@ -12,7 +12,7 @@ class BasePongGame(ABC):
     """
 
     @abstractmethod
-    def reset(self):
+    def reset(self) -> List[float]:
         """Reset the game state and return the initial state."""
 
     @abstractmethod

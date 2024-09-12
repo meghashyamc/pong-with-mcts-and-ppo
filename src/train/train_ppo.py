@@ -5,6 +5,7 @@ Train PPO agent for Simple/Complex Pong environment
 import os
 import csv
 import time
+import random
 import argparse
 from typing import Tuple, List
 import pygame
@@ -16,9 +17,12 @@ from matplotlib.figure import Figure
 from matplotlib.axes._axes import Axes
 from src.pong.game_factory import get_pong_game
 from src.pong import constants as pong_constants
-from src.algorithms.PPO import PPO
+from src.algorithms.ppo import PPO
 from src.logger.logger import logger
 from src.train import constants
+from src.algorithms.mcts_wrapper import MCTS
+from src.pong.mcts_pong_state import MCTSPongState
+
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 logger.info(f"Device set to: {device}")
@@ -34,7 +38,11 @@ class PPOTrainer:
         env_name: str,
         reward_frequency: str,
         show_game_during_training: bool = False,
+        show_visual_plot_during_training: bool = False,
+        use_mcts: bool = False,
     ):
+        self.show_game_during_training = show_game_during_training
+        self.show_visual_plot_during_training = show_visual_plot_during_training
         # if headless = True, the game will be not be rendered
         self.env = get_pong_game(env_name)(
             headless=(not show_game_during_training), reward_frequency=reward_frequency
@@ -54,23 +62,28 @@ class PPOTrainer:
             constants.ACTION_STD,
         )
 
+        self.use_mcts = use_mcts
+        if use_mcts:
+            self.mcts_probability = 1
+            self.mcts_agent = MCTS()
+
         self._setup_result_paths()
 
     def train(
         self,
-        show_visual_plot_during_training: bool = False,
-        show_game_during_training: bool = False,
     ):
         """
-        The function to train the PPO agent for the Simple Pong environment
+        The function to train the PPO agent for the Simple Pong or Complex Pong environments
         """
-
+        show_game_during_training: bool = self.show_game_during_training
+        show_visual_plot_during_training: bool = self.show_visual_plot_during_training
         # track total training time
         logger.info("Started training at (GMT) : %s", self.start_time)
 
         episodes = []
         rewards = []
         avg_rewards = []
+
         paddle_hits_history = []
         avg_paddle_hits_list = []
         episodes_vs_time = []
@@ -82,16 +95,28 @@ class PPOTrainer:
         for i_episode in range(constants.MAX_EPISODES):
 
             state = self.env.reset()
+            mcts_pong_state = (
+                MCTSPongState(
+                    self.env_name,
+                    headless=(not self.show_game_during_training),
+                    reward_frequency=self.reward_frequency,
+                )
+                if self.use_mcts
+                else None
+            )
             episode_reward = 0
             time_step = 0
             paddle_hits = 0
 
             while True:
-                # select action with policy
-                action = self.ppo_agent.select_action(state)
+                action, mcts_chosen = self.select_action(state, mcts_pong_state)
 
                 # Step the environment
                 next_state, reward, done = self.env.step(action)
+                if self.use_mcts and mcts_chosen:
+                    mcts_pong_state.state = state
+                    mcts_pong_state.reward = reward
+                    mcts_pong_state.done = done
                 if reward == pong_constants.PADDLE_HIT_REWARD:
                     paddle_hits += 1
                 # Render the game
@@ -119,6 +144,7 @@ class PPOTrainer:
             rewards.append(episode_reward)
             paddle_hits_history.append(paddle_hits)
 
+            self._update_mcts_probability(rewards)
             self._log_average_reward(
                 episodes, rewards, avg_rewards, show_visual_plot_during_training, line1
             )
@@ -143,6 +169,30 @@ class PPOTrainer:
         logger.info(f"Total training time: {time.time() - self.start_time}")
 
         self._continue_showing_plot()
+
+    def select_action(
+        self, state: List[float], mcts_pong_state: MCTSPongState
+    ) -> Tuple[int, bool]:
+        """
+        Select action to take - either using MCTS or PPO.
+        """
+        # Use PPO
+        if not self.use_mcts or (random.random() > self.mcts_probability):
+            return self.ppo_agent.select_action(state), False
+
+        # Use MCTS but populate the PPO log probabilities buffer with the appropriate information
+        action = self.mcts_agent.searcher.search(initialState=mcts_pong_state)
+        ppo_action = torch.tensor([action], dtype=torch.long).to(device)
+
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(device)
+            _, action_logprob, state_val = self.ppo_agent.policy_old.act(state)
+            self.ppo_agent.buffer.states.append(state)
+            self.ppo_agent.buffer.actions.append(ppo_action)
+            self.ppo_agent.buffer.logprobs.append(action_logprob)
+            self.ppo_agent.buffer.state_values.append(state_val)
+
+        return action, True
 
     def _setup_result_paths(self):
         self.csv_folder = f"results/{self.env_name}"
@@ -265,6 +315,24 @@ class PPOTrainer:
         )
         return float(avg_reward)
 
+    def _update_mcts_probability(self, rewards: List[float]):
+        if not self.use_mcts or (len(rewards) < 2 * constants.WINDOW_SIZE):
+            return
+        avg_reward = np.mean(rewards[-constants.WINDOW_SIZE :])
+        improvement = avg_reward - np.mean(
+            rewards[-2 * constants.WINDOW_SIZE : -constants.WINDOW_SIZE]
+        )
+        if improvement > constants.PERFORMANCE_THRESHOLD_FOR_MCTS_FACTOR_CHANGE:
+            self.mcts_probability = max(
+                0, self.mcts_probability * (1 - constants.MCTS_DOWNGRADE_RATE)
+            )
+            return
+        if improvement < 0:
+            self.mcts_probability = min(
+                1, self.mcts_probability * (1 + constants.MCTS_UPGRADE_RATE)
+            )
+            return
+
     def _save_csv_data(
         self,
         avg_rewards: List[float],
@@ -308,8 +376,33 @@ if __name__ == "__main__":
         help="Reward frequency",
     )
 
+    parser.add_argument(
+        f"--{constants.ARG_RENDER}",
+        type=str,
+        default=False,
+        help="Render game during training",
+    )
+
+    parser.add_argument(
+        f"--{constants.ARG_PLOT}",
+        type=str,
+        default=False,
+        help="Plot average rewards and paddle hits during training",
+    )
+
+    parser.add_argument(
+        f"--{constants.USE_MCTS}",
+        type=str,
+        default=False,
+        help="Use MCTS to support PPO",
+    )
+
     args = parser.parse_args()
     ppo_trainer = PPOTrainer(
-        env_name=args.env_name, reward_frequency=args.reward_frequency
+        env_name=args.env_name,
+        reward_frequency=args.reward_frequency,
+        show_game_during_training=args.render,
+        show_visual_plot_during_training=args.plot,
+        use_mcts=args.mcts,
     )
     ppo_trainer.train()

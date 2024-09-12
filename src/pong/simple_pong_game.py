@@ -41,7 +41,7 @@ class SimplePongGame(BasePongGame):
         self.reward = 0
         self.done = False
 
-    def reset(self):
+    def reset(self) -> List[float]:
         """Reset the game state and return the initial state."""
         self.paddle.reset()
         self.ball.reset()
@@ -95,7 +95,7 @@ class SimplePongGame(BasePongGame):
             / constants.SCREEN_WIDTH
         )
 
-    def _get_state(self):
+    def _get_state(self) -> List[float]:
         """
         Get the current state of the game.
 
