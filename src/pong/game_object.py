@@ -28,6 +28,12 @@ class GameObject(ABC):
         Update the game object's state
         """
 
+    @abstractmethod
+    def copy(self) -> "GameObject":
+        """
+        Create a copy of the current game object
+        """
+
 
 class Paddle(GameObject):
     """
@@ -92,6 +98,11 @@ class Paddle(GameObject):
         self.position.x = new_x
         self.position.clamp_ip(screen_rect)
 
+    def copy(self) -> "Paddle":
+        new_paddle = Paddle(self.position.x, self.position.y, self.width, self.height)
+        new_paddle.velocity = Velocity(x=self.velocity.x, y=self.velocity.y)
+        return new_paddle
+
 
 class Obstacle(GameObject):
     """
@@ -131,6 +142,9 @@ class Obstacle(GameObject):
     def update(self, screen_rect: pygame.Rect):
         self.position.x += self.velocity.x
 
+    def copy(self) -> "Obstacle":
+        return Obstacle(self.position.x, self.position.y)
+
 
 class Ball(GameObject):
     """
@@ -150,9 +164,10 @@ class Ball(GameObject):
             constants.SCREEN_HEIGHT // 2 - constants.BALL_SIZE // 2,
         )
 
-    def __init__(self, x: float, y: float):
+    def __init__(self, x: float, y: float, reset: bool = True):
         super().__init__(x, y, constants.BALL_SIZE, constants.BALL_SIZE)
-        self.reset()
+        if reset:
+            self.reset()
 
     def reset(self):
         """
@@ -290,3 +305,8 @@ class Ball(GameObject):
         Check if the ball has fallen through the bottom wall
         """
         return self.position.bottom >= constants.SCREEN_HEIGHT and self.velocity.y > 0
+
+    def copy(self) -> "Ball":
+        new_ball = Ball(self.position.x, self.position.y, reset=False)
+        new_ball.velocity = Velocity(x=self.velocity.x, y=self.velocity.y)
+        return new_ball

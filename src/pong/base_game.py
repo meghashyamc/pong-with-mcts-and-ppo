@@ -44,3 +44,15 @@ class BasePongGame(ABC):
     @abstractmethod
     def run(self):
         """Main game loop for human play"""
+
+    @abstractmethod
+    def clone(self):
+        """
+        Clone the game object
+        """
+
+    @abstractmethod
+    def get_action_based_on_heuristic(self, randomness: float) -> int:
+        """
+        Gets the next action to take based on a heuristic.
+        """

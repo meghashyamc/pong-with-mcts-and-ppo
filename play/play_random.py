@@ -4,9 +4,10 @@ Functionality to visualize MCTS agent playing Pong games
 
 import os
 import csv
+import random
 import time
 import argparse
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import pygame
 import numpy as np
@@ -18,45 +19,28 @@ from src.pong.game_factory import get_pong_game
 from src.logger.logger import logger
 
 
-class MCTSPlayer:
+class RandomPlayer:
     """
-    Class to make an MCTS agent play Pong
+    Class to make a agent play Pong with random actions
     """
-
-    ARG_NUM_OF_ITERATIONS = "iterations"
-    ARG_TIME_LIMIT = "timelimit"
 
     def __init__(
         self,
         env_name: str,
         reward_frequency: str,
-        num_of_iterations: Optional[int],
-        time_limit: Optional[int],
         render_game: bool = False,
-        heuristic: bool = False,
     ):
         self.show_game = render_game
         self.env_name = env_name
         self.env = get_pong_game(env_name)(
-            headless=(not self.show_game), reward_frequency=reward_frequency
+            headless=True, reward_frequency=reward_frequency
         )
         self.start_time = time.time()
-        self.num_of_iterations = num_of_iterations
-        self.time_limit = time_limit
-        self.mcts_agent = MCTS(
-            iteration_limit=self.num_of_iterations,
-            time_limit=self.time_limit,
-            heuristic=heuristic,
-        )
         self.reward_frequency = reward_frequency
-        self.heuristic = heuristic
         self._setup_result_paths()
 
     def _setup_result_paths(self):
-        if self.heuristic:
-            self.csv_folder = f"results/{self.env_name}/mcts/heuristic"
-        else:
-            self.csv_folder = f"results/{self.env_name}/mcts/randomrollout"
+        self.csv_folder = f"results/{self.env_name}/random"
         os.makedirs(self.csv_folder, exist_ok=True)
         self.avg_rewards_file = os.path.join(
             self.csv_folder,
@@ -87,20 +71,16 @@ class MCTSPlayer:
             done = False
             timesteps = 0
             paddle_hits = 0
-            self.env.reset()
+            possible_actions = list(
+                range(
+                    constants.ACTION_DIMS[self.env_name],
+                )
+            )
 
             while not done:
-                initial_game_state = self.env.clone()
-                mcts_pong_state = MCTSPongState(
-                    self.env_name,
-                    initial_game_state,
-                    reward_frequency=self.reward_frequency,
-                    heuristic=self.heuristic,
-                )
-                start = time.time()
-                action = self.mcts_agent.searcher.search(initialState=mcts_pong_state)
-                print(f"action choosing took {1000 * (time.time() - start)} ms")
-                _, reward, done = self.env.step(action)
+                action = random.choice(possible_actions)
+
+                state, reward, done = self.env.step(action)
 
                 episode_reward += reward
                 timesteps += 1
@@ -196,40 +176,16 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        f"--{MCTSPlayer.ARG_NUM_OF_ITERATIONS}",
-        type=int,
-        default=None,
-        help="Max number of iterations per action",
-    )
-
-    parser.add_argument(
-        f"--{MCTSPlayer.ARG_TIME_LIMIT}",
-        type=int,
-        default=None,
-        help="Time limit per move for MCTS in ms",
-    )
-
-    parser.add_argument(
         f"--{constants.ARG_RENDER}",
-        type=bool,
+        type=str,
         default=False,
         help="Render game",
     )
 
-    parser.add_argument(
-        f"--{constants.ARG_MCTS_HEURISTIC}",
-        type=bool,
-        default=False,
-        help="Use heuristic",
-    )
-
     args = parser.parse_args()
-    mcts_player = MCTSPlayer(
+    random_player = RandomPlayer(
         env_name=args.env_name,
         reward_frequency=args.reward_frequency,
-        num_of_iterations=args.iterations,
-        time_limit=args.timelimit,
         render_game=args.render,
-        heuristic=args.heuristic,
     )
-    mcts_player.play()
+    random_player.play()

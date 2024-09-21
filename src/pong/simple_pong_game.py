@@ -2,6 +2,10 @@
 """
 Functionality for combining the various parts of the Simple Pong game
 """
+
+import time
+import copy
+import random
 from typing import List, Tuple
 import pygame
 from src.pong import constants
@@ -150,3 +154,31 @@ class SimplePongGame(BasePongGame):
 
             if self.done:
                 self.reset()
+
+    def clone(self) -> "SimplePongGame":
+        """Create a copy of the current game instance."""
+        new_game = SimplePongGame(True, self.reward_frequency)
+        new_game.paddle = self.paddle.copy()
+        new_game.ball = self.ball.copy()
+        new_game.reward = self.reward
+        new_game.done = self.done
+        return new_game
+
+    def get_action_based_on_heuristic(self, randomness=0.1) -> int:
+        """
+        Gets the action to take based on the relative position of the
+        ball and paddle.
+        """
+        if random.random() < randomness:
+            return random.choice(
+                [
+                    constants.SIMPLE_PONG_ACTION_PADDLE_LEFT,
+                    constants.SIMPLE_PONG_ACTION_PADDLE_STAY,
+                    constants.SIMPLE_PONG_ACTION_PADDLE_RIGHT,
+                ]
+            )
+        if self.ball.position.centerx < self.paddle.position.left:
+            return constants.SIMPLE_PONG_ACTION_PADDLE_LEFT
+        if self.ball.position.centerx > self.paddle.position.right:
+            return constants.SIMPLE_PONG_ACTION_PADDLE_RIGHT
+        return constants.SIMPLE_PONG_ACTION_PADDLE_STAY
