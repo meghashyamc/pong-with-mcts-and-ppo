@@ -1,5 +1,5 @@
 """
-Constants related to Simple Pong game
+Constants related to all Pong games
 """
 
 from src.models.pong import Color

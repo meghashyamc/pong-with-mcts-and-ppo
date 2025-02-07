@@ -1,10 +1,11 @@
 # pylint: disable=invalid-name
 """
-Pong state related functionality needed by MCTS library
+Pong state related functionality needed by MCTS library.
 """
 
 from typing import List
 from src.train import constants
+from src.pong import constants as pong_constants
 from src.pong.base_game import BasePongGame
 from src.algorithms.mcts_wrapper import MCTS
 
@@ -19,13 +20,11 @@ class MCTSPongState(MCTS.MCTSState):
         env_name: str,
         env: BasePongGame,
         reward_frequency: str,
-        heuristic: bool = False,
         game: BasePongGame = None,
         done: bool = False,
         reward: float = 0,
     ):
         self.env_name = env_name
-        self.heuristic = heuristic
         self.reward_frequency = reward_frequency
 
         if game:
@@ -36,7 +35,7 @@ class MCTSPongState(MCTS.MCTSState):
             return
 
         # clone the initial game state
-        self.game = env.clone()
+        self.game = env
         self.game.reset()
         self.done = False
         self.reward = 0
@@ -63,18 +62,26 @@ class MCTSPongState(MCTS.MCTSState):
             )
         )
 
+    def getStates(self):
+        """
+        Gets list of possible states
+        """
+        return self.game
+
     def takeAction(self, action) -> "MCTSPongState":
         """
         Takes action and returns next state, reward and whether we're done
         """
         new_game = self.game.clone()
+        # Apply the action to the cloned game
         _, reward, done = new_game.step(action)
-        # create a new MCTSPongState with the updated game
+        # Apply the action to the current game state
+
+        # Create a new state
         new_state = MCTSPongState(
             self.env_name,
-            env=None,  # we use the cloned game, so no need to pass env
+            env=None,
             reward_frequency=self.reward_frequency,
-            heuristic=self.heuristic,
             game=new_game,
             done=done,
             reward=reward,
@@ -85,10 +92,25 @@ class MCTSPongState(MCTS.MCTSState):
         """
         Whether the game is done
         """
-        return self.done
+        return (self.reward == pong_constants.PADDLE_HIT_REWARD) or (
+            self.reward == pong_constants.BALL_FALLING_THROUGH_REWARD
+        )
 
     def getReward(self):
         """
         Get reward
         """
-        return self.reward
+        if self.reward == pong_constants.BALL_FALLING_THROUGH_REWARD:
+            return 0
+        if self.reward == pong_constants.PADDLE_HIT_REWARD:
+            return 1
+        raise ValueError(f"Invalid reward: {self.reward}")
+
+    def getState(self):
+        """
+        Get the current state of the game.
+        """
+        return self.game.get_state()
+
+    def __str__(self):
+        return f"{self.game}"

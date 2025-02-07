@@ -1,10 +1,14 @@
 """
-Train PPO agent for Simple/Complex Pong environment
+This file contains functionality to train a PPO/PPO-MCTS agent
+to play Simple/Complex Pong. Running this file will start the training based
+on the arguments passed (as specified towards the end of the file). After the
+training is complete, trained '.pth' file will be saved in the 'trained' folder.
 """
 
 import os
 import csv
 import time
+import random
 import argparse
 from collections import deque
 from typing import Tuple, List
@@ -16,7 +20,6 @@ from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
 from matplotlib.axes._axes import Axes
 from src.pong.game_factory import get_pong_game
-from src.pong.base_game import BasePongGame
 from src.pong import constants as pong_constants
 from src.algorithms.ppo import PPO
 from src.logger.logger import logger
@@ -31,7 +34,7 @@ logger.info(f"Device set to: {device}")
 
 class PPOTrainer:
     """
-    The class to train the agent for the Simple Pong environment
+    The class to train the agent for the Simple Pong/Complex Pong environments
     """
 
     def __init__(
@@ -41,7 +44,6 @@ class PPOTrainer:
         show_game_during_training: bool = False,
         show_visual_plot_during_training: bool = False,
         use_mcts: bool = False,
-        heuristic: bool = False,
     ):
         self.show_game_during_training = show_game_during_training
         self.show_visual_plot_during_training = show_visual_plot_during_training
@@ -62,25 +64,24 @@ class PPOTrainer:
             constants.EPS_CLIP,
             constants.HAS_CONTINUOUS_ACTION_SPACE,
             constants.ACTION_STD,
+            constants.IMITATION_LOSS_WEIGHTS[env_name],
         )
 
         self.use_mcts = use_mcts
-        self.heuristic = None
         if use_mcts:
-            self.mcts_agent = MCTS(heuristic=heuristic)
-            self.heuristic = heuristic
-
+            self.mcts_agent = MCTS()
+        self.ppo_choice_history = deque(maxlen=100)
+        logger.info(f"using mcts: {self.use_mcts}")
         self._setup_result_paths()
 
     def train(
         self,
     ):
         """
-        The function to train the PPO agent for the Simple Pong or Complex Pong environments
+        The main function to train the PPO/PPO-MCTS agent to play Simple/Complex Pong.
         """
         show_game_during_training: bool = self.show_game_during_training
         show_visual_plot_during_training: bool = self.show_visual_plot_during_training
-        # track total training time
         logger.info("Started training at (GMT) : %s", self.start_time)
 
         episodes = []
@@ -98,19 +99,17 @@ class PPOTrainer:
         for i_episode in range(constants.MAX_EPISODES):
 
             state = self.env.reset()
-            mcts_pong_state = self._get_new_mcts_pong_state()
 
             episode_reward = 0
             time_step = 0
             paddle_hits = 0
 
             while True:
-                action = self.select_action(state, mcts_pong_state)
+
+                action = self.select_action(i_episode, state)
 
                 # Step the environment
                 next_state, reward, done = self.env.step(action)
-                if self.use_mcts:
-                    mcts_pong_state.update(self.env, state, reward, done)
 
                 if reward == pong_constants.PADDLE_HIT_REWARD:
                     paddle_hits += 1
@@ -132,7 +131,8 @@ class PPOTrainer:
             # Update every episode
             self.ppo_agent.update()
             logger.info(
-                "Recent PPO use percentage: %.2f", self._get_ppo_use_percentage()
+                "Recent PPO 'is better' percentage: %.2f",
+                self._get_ppo_is_better_percentage(),
             )
 
             logger.info("Reward for episode %d was %d", i_episode, episode_reward)
@@ -170,66 +170,108 @@ class PPOTrainer:
 
     def select_action(
         self,
+        episode: int,
         state: List[float],
-        mcts_pong_state: MCTSPongState,
     ) -> int:
         """
         Select action to take - either using MCTS or PPO.
         """
+        ppo_action = None
+        mcts_action = constants.DUMMY_ACTION
+        mcts_action_tensor = torch.tensor(mcts_action).to(device)
+        is_mcts_better = False
 
-        # Use PPO
         if not self.use_mcts:
-            return self.ppo_agent.select_action(state)
+            ppo_action = self.ppo_agent.select_action(state)
+            self._update_action_choice(mcts_action, is_mcts_better)
+            return ppo_action
 
         # Calculate the percentage of PPO choices in the last 100 decisions
-        ppo_percentage = self._get_ppo_use_percentage()
-
-        # Use PPO if it has been chosen 95% or more of the last 100 times
+        ppo_percentage = self._get_ppo_is_better_percentage()
         if (
-            ppo_percentage >= constants.PPO_PERCENTAGE_THRESHOLD
+            ppo_percentage >= self._get_ppo_percentage_threshold(episode)
             and len(self.ppo_choice_history) == constants.LENGTH_PPO_CHOICE_HISTORY
         ):
-            self.ppo_choice_history.append(1)
-            return self.ppo_agent.select_action(state)
+            ppo_action = self.ppo_agent.select_action(state)
+            self._update_action_choice(mcts_action, is_mcts_better)
+            return ppo_action
 
         simulated_game_ppo = self.env.clone()
-        simulated_game_mcts = self.env.clone()
 
-        tensor_state = torch.FloatTensor(state).to(device)
-        simulated_ppo_action, _, _ = self.ppo_agent.policy_old.act(tensor_state)
+        with torch.no_grad():
+            ppo_state = torch.FloatTensor(state).to(device)
+            ppo_action_result, _, _ = self.ppo_agent.policy_old.act(ppo_state)
+            ppo_action = ppo_action_result.item()
 
-        _, ppo_reward, _ = simulated_game_ppo.step(simulated_ppo_action)
+        _, ppo_reward, _ = simulated_game_ppo.step(ppo_action)
         if ppo_reward == pong_constants.PADDLE_HIT_REWARD:
-            self.ppo_choice_history.append(1)
-            return self.ppo_agent.select_action(state)
+            ppo_action = self.ppo_agent.select_action(state)
+            self._update_action_choice(mcts_action, is_mcts_better)
+            return ppo_action
 
+        simulated_game_mcts = self.env.clone()
+        mcts_pong_state = MCTSPongState(
+            self.env_name,
+            simulated_game_mcts,
+            reward_frequency=self.reward_frequency,
+        )
         simulated_mcts_action = self.mcts_agent.searcher.search(
             initialState=mcts_pong_state
         )
         _, mcts_reward, _ = simulated_game_mcts.step(simulated_mcts_action)
-        if ppo_reward >= mcts_reward:
-            self.ppo_choice_history.append(1)
-            return self.ppo_agent.select_action(state)
 
-        # Use MCTS but populate the PPO log probabilities buffer with the appropriate information
-        ppo_action_for_mcts = torch.tensor(simulated_mcts_action, dtype=torch.long).to(
-            device
-        )
+        if (ppo_reward >= mcts_reward) and (ppo_reward > 0):
+            ppo_action = self.ppo_agent.select_action(state)
+            self._update_action_choice(mcts_action, is_mcts_better)
+            return ppo_action
+
+        if (ppo_reward == mcts_reward) and (ppo_reward == 0):
+            ppo_chosen = random.choice([True, False])
+            if ppo_chosen:
+                ppo_action = self.ppo_agent.select_action(state)
+                self._update_action_choice(mcts_action, is_mcts_better)
+                return ppo_action
+
+        mcts_action = simulated_mcts_action
+        is_mcts_better = True
         with torch.no_grad():
-            _, action_logprob, state_val = self.ppo_agent.policy_old.act(tensor_state)
-            self.ppo_agent.buffer.states.append(tensor_state)
-            self.ppo_agent.buffer.actions.append(ppo_action_for_mcts)
-            self.ppo_agent.buffer.logprobs.append(action_logprob)
-            self.ppo_agent.buffer.state_values.append(state_val)
-        self.ppo_choice_history.append(0)
-        return simulated_mcts_action
+            mcts_action_tensor = torch.tensor(mcts_action).to(device)
+            if not self.ppo_agent.has_continuous_action_space:
+                mcts_action_tensor = mcts_action_tensor.long()
 
-    def _get_ppo_use_percentage(self) -> float:
+            state_tensor = torch.FloatTensor(state).to(device)
+            mcts_action_logprob, state_value, _ = self.ppo_agent.policy_old.evaluate(
+                state_tensor, mcts_action_tensor
+            )
+            mcts_action_logprob = mcts_action_logprob.detach()
+            state_value = state_value.detach()
+
+        # Store data in PPO buffer
+        self.ppo_agent.buffer.states.append(state_tensor)
+        self.ppo_agent.buffer.actions.append(mcts_action_tensor)
+        self.ppo_agent.buffer.logprobs.append(mcts_action_logprob)
+        self.ppo_agent.buffer.state_values.append(state_value)
+
+        self._update_action_choice(mcts_action, is_mcts_better)
+        return mcts_action
+
+    def _get_ppo_percentage_threshold(self, episode: int) -> float:
+        if self.env_name == pong_constants.ENV_SIMPLE_PONG:
+            return max(0, 1 - (episode / 500))
+        if self.env_name == pong_constants.ENV_COMPLEX_PONG:
+            return max(0, 1 - (episode / 1000))
+        raise Exception(
+            "Invalid environment name when calculating PPO percentage threshold"
+        )
+
+    def _update_action_choice(self, mcts_action: int, is_mcts_better: bool):
+        self.ppo_agent.buffer.mcts_actions.append(mcts_action)
+        self.ppo_agent.buffer.is_mcts_better.append(is_mcts_better)
+        self.ppo_choice_history.append(1 if (not is_mcts_better) else 0)
+
+    def _get_ppo_is_better_percentage(self) -> float:
         if not self.use_mcts:
             return 1
-        # Initialize a deque to keep track of the last 100 choices
-        if not hasattr(self, constants.FIELD_PPO_CHOICE_HISTORY):
-            self.ppo_choice_history = deque(maxlen=100)
 
         # Calculate the percentage of PPO choices in the last 100 decisions
         ppo_percentage = (
@@ -239,21 +281,11 @@ class PPOTrainer:
         )
         return ppo_percentage
 
-    def _get_new_mcts_pong_state(self) -> MCTSPongState:
-        return MCTSPongState(
-            self.env_name,
-            self.env,
-            reward_frequency=self.reward_frequency,
-        )
-
     def _setup_result_paths(self):
         if not self.use_mcts:
             self.csv_folder = f"results/{self.env_name}/ppo"
         else:
-            if self.heuristic:
-                self.csv_folder = f"results/{self.env_name}/ppo-mcts/heuristic"
-            else:
-                self.csv_folder = f"results/{self.env_name}/ppo-mcts/randomrollout"
+            self.csv_folder = f"results/{self.env_name}/ppo-mcts/original"  # Original just means we are using 'pure' MCTS
         os.makedirs(self.csv_folder, exist_ok=True)
         self.avg_rewards_file = os.path.join(
             self.csv_folder,
@@ -269,10 +301,11 @@ class PPOTrainer:
         )
 
     def _save_model(self):
+        mcts_path_component = "_mcts" if self.use_mcts else ""
         final_model_path = os.path.join(
             constants.TRAINED_FOLDER_NAME,
             self.env_name,
-            f"PPO_{self.reward_frequency}_{time.time()}.pth",
+            f"PPO{mcts_path_component}_{self.reward_frequency}_{time.time()}.pth",
         )
         self.ppo_agent.save(final_model_path)
         logger.info(f"Final model saved at: {final_model_path}")
@@ -427,7 +460,7 @@ if __name__ == "__main__":
         f"--{constants.ARG_PLOT}",
         type=bool,
         default=False,
-        help="Plot average rewards and paddle hits during training",
+        help="Plot average paddle hits during training",
     )
 
     parser.add_argument(
@@ -437,13 +470,6 @@ if __name__ == "__main__":
         help="Use MCTS to support PPO",
     )
 
-    parser.add_argument(
-        f"--{constants.ARG_MCTS_HEURISTIC}",
-        type=str,
-        default=False,
-        help="Use heuristic",
-    )
-
     args = parser.parse_args()
     ppo_trainer = PPOTrainer(
         env_name=args.env_name,
@@ -451,6 +477,5 @@ if __name__ == "__main__":
         show_game_during_training=args.render,
         show_visual_plot_during_training=args.plot,
         use_mcts=args.mcts,
-        heuristic=args.heuristic,
     )
     ppo_trainer.train()

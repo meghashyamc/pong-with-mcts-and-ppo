@@ -1,4 +1,14 @@
 # pylint: disable-all
+
+"""
+Original PPO implementation by Nikhil Barhate
+Source: https://github.com/nikhilbarhate99/PPO-PyTorch
+Changes made are:
+-  Minor logging additions have been mde
+-  Minor addition of gradient clipping (to help prevent help prevent exploding gradients)
+-  If an MCTS action is selected as compared to PPO's action (during training), then
+   an imitation loss is added to help PPO learn from MCTS
+"""
 """
 MIT License
 
@@ -23,9 +33,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-# PPO implementation by Nikhil Barhate
-# Source: https://github.com/nikhilbarhate99/PPO-PyTorch
-# Minor modifications related to logging  and the addition of gradient clipping (to help prevent help prevent exploding gradients) have been made
 
 import torch
 import torch.nn as nn
@@ -59,6 +66,8 @@ class RolloutBuffer:
         self.rewards = []
         self.state_values = []
         self.is_terminals = []
+        self.mcts_actions = []
+        self.is_mcts_better = []
 
     def clear(self):
         del self.actions[:]
@@ -67,6 +76,8 @@ class RolloutBuffer:
         del self.rewards[:]
         del self.state_values[:]
         del self.is_terminals[:]
+        del self.mcts_actions[:]
+        del self.is_mcts_better[:]
 
 
 class ActorCritic(nn.Module):
@@ -168,6 +179,8 @@ class ActorCritic(nn.Module):
 
 
 class PPO:
+    DUMMY_ACTION = -1
+
     def __init__(
         self,
         state_dim,
@@ -179,8 +192,9 @@ class PPO:
         eps_clip,
         has_continuous_action_space,
         action_std_init=0.6,
+        imitation_loss_weight=0,
     ):
-
+        self.imitation_loss_weight = imitation_loss_weight
         self.has_continuous_action_space = has_continuous_action_space
 
         if has_continuous_action_space:
@@ -209,6 +223,7 @@ class PPO:
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
+        self.nll_loss = nn.NLLLoss(reduction="none")
 
     def set_action_std(self, new_action_std):
         if self.has_continuous_action_space:
@@ -276,6 +291,12 @@ class PPO:
 
             return action.item()
 
+    def select_action_pretrained(self, state):
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(device)
+            action, action_logprob, state_val = self.policy_old.act(state)
+            return action.item(), action_logprob, state_val
+
     def update(self):
         # Monte Carlo estimate of returns
         rewards = []
@@ -292,7 +313,8 @@ class PPO:
         rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
-        # convert list to tensor
+        # Convert lists to tensors
+
         old_states = (
             torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach().to(device)
         )
@@ -307,8 +329,15 @@ class PPO:
             .detach()
             .to(device)
         )
+        is_mcts_better = torch.tensor(self.buffer.is_mcts_better, dtype=torch.bool).to(
+            device
+        )
+        mcts_actions_list = self.buffer.mcts_actions  # List, may contain None
 
-        # calculate advantages
+        # Prepare mcts_actions tensor
+        mcts_actions = torch.tensor(mcts_actions_list, dtype=torch.long).to(device)
+
+        # Calculate advantages
         advantages = rewards.detach() - old_state_values.detach()
 
         # Optimize policy for K epochs
@@ -318,27 +347,69 @@ class PPO:
             logprobs, state_values, dist_entropy = self.policy.evaluate(
                 old_states, old_actions
             )
-
-            # match state_values tensor dimensions with rewards tensor
             state_values = torch.squeeze(state_values)
 
             # Finding the ratio (pi_theta / pi_theta__old)
             ratios = torch.exp(logprobs - old_logprobs.detach())
 
-            # Finding Surrogate Loss
+            # Surrogate loss
             surr1 = ratios * advantages
             surr2 = (
                 torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
             )
+            ppo_loss = -torch.min(surr1, surr2)
 
-            # final loss of clipped objective PPO
+            # Value function loss
+            value_loss = 0.5 * self.MseLoss(state_values, rewards)
+
+            # Entropy loss
+            entropy_loss = -0.01 * dist_entropy
+            # Initialize imitation loss as zeros (per-sample loss)
+            imitation_loss = torch.zeros_like(ppo_loss).to(device)
+            # Compute imitation loss for better MCTS actions
+            if is_mcts_better.any():
+                indices = is_mcts_better.nonzero(as_tuple=True)[0]
+
+                # Get corresponding action logits and MCTS actions
+                mcts_action_probs = self.policy.actor(old_states[indices])
+                mcts_actions_better = mcts_actions[indices]
+
+                # Exclude dummy actions (-1)
+                valid_indices = mcts_actions_better != PPO.DUMMY_ACTION
+                mcts_action_probs = mcts_action_probs[valid_indices]
+                mcts_actions_better = mcts_actions_better[valid_indices]
+
+                # Compute log probabilities
+                # Add a small value to prevent taking log(0)
+
+                # Compute imitation loss using log probabilities
+                if mcts_actions_better.numel() > 0:
+                    log_probs = torch.log(mcts_action_probs + 1e-10)
+                    mcts_actions_better = mcts_actions_better.long()
+                    imitation_losses = self.nll_loss(log_probs, mcts_actions_better)
+                    # Assign imitation losses back to the appropriate positions
+                    imitation_loss[indices] = imitation_losses
+                else:
+                    pass  # imitation_loss remains zeros where MCTS is not better
+
+            else:
+                pass  # imitation_loss remains zeros
+
+            # Total loss
             loss = (
-                -torch.min(surr1, surr2)
-                + 0.5 * self.MseLoss(state_values, rewards)
-                - 0.01 * dist_entropy
+                ppo_loss
+                + value_loss
+                + entropy_loss
+                + self.imitation_loss_weight * imitation_loss
             )
+            # print("ppo loss========================== ", ppo_loss)
+            # print("value loss======================== ", value_loss)
+            # print("entropy loss====================== ", entropy_loss)
+            # print(
+            #     "imitation loss==================== ", weighing_factor * imitation_loss
+            # )
 
-            # take gradient step
+            # Take gradient step
             self.optimizer.zero_grad()
             loss.mean().backward()
             torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
@@ -347,7 +418,7 @@ class PPO:
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
 
-        # clear buffer
+        # Clear buffer
         self.buffer.clear()
 
     def save(self, checkpoint_path):

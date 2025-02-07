@@ -51,7 +51,7 @@ class SimplePongGame(BasePongGame):
         self.ball.reset()
         self.reward = 0
         self.done = False
-        return self._get_state()
+        return self.get_state()
 
     def step(self, action: int) -> Tuple[List, float, bool]:
         """
@@ -73,7 +73,7 @@ class SimplePongGame(BasePongGame):
                 self.paddle.move(Direction.STAYPUT)
 
         self.update()
-        next_state = self._get_state()
+        next_state = self.get_state()
 
         return next_state, self.reward, self.done
 
@@ -87,19 +87,20 @@ class SimplePongGame(BasePongGame):
 
     def update_reward(self, reward: float):
         """Update the reward based on the reward received or the default reward."""
-        if not reward and self.reward_frequency == constants.FREQUENCY_FREQUENT:
+        if not reward:
             reward = self.get_default_reward()
         self.reward = reward
 
     def get_default_reward(self) -> float:
         """Get the default reward for an action."""
+        if self.reward_frequency == constants.FREQUENCY_FREQUENT:
+            return 1 - (
+                abs(self.ball.position.centerx - self.paddle.position.centerx)
+                / constants.SCREEN_WIDTH
+            )
+        return 0
 
-        return 1 - (
-            abs(self.ball.position.centerx - self.paddle.position.centerx)
-            / constants.SCREEN_WIDTH
-        )
-
-    def _get_state(self) -> List[float]:
+    def get_state(self) -> List[float]:
         """
         Get the current state of the game.
 
@@ -164,21 +165,5 @@ class SimplePongGame(BasePongGame):
         new_game.done = self.done
         return new_game
 
-    def get_action_based_on_heuristic(self, randomness=0.1) -> int:
-        """
-        Gets the action to take based on the relative position of the
-        ball and paddle.
-        """
-        if random.random() < randomness:
-            return random.choice(
-                [
-                    constants.SIMPLE_PONG_ACTION_PADDLE_LEFT,
-                    constants.SIMPLE_PONG_ACTION_PADDLE_STAY,
-                    constants.SIMPLE_PONG_ACTION_PADDLE_RIGHT,
-                ]
-            )
-        if self.ball.position.centerx < self.paddle.position.left:
-            return constants.SIMPLE_PONG_ACTION_PADDLE_LEFT
-        if self.ball.position.centerx > self.paddle.position.right:
-            return constants.SIMPLE_PONG_ACTION_PADDLE_RIGHT
-        return constants.SIMPLE_PONG_ACTION_PADDLE_STAY
+    def __str__(self):
+        return f"paddle position: {self.paddle.position.centerx / constants.SCREEN_WIDTH}, paddle velocity: {self.paddle.velocity.x / constants.SCREEN_WIDTH}, ball position: {self.ball.position.centerx / constants.SCREEN_WIDTH}, ball velocity: {self.ball.velocity.x / constants.SCREEN_WIDTH}, ball velocity y: {self.ball.velocity.y / constants.SCREEN_WIDTH}"

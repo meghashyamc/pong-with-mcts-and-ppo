@@ -1,5 +1,6 @@
 """
-Starting point of Simple/Complex Pong games when they are played by humans
+Starting point of Simple/Complex Pong games when they are played by humans.
+This file is not relevant when an agent plays Simple/Complex Pong games.
 """
 
 import argparse

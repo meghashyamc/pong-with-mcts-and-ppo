@@ -1,5 +1,5 @@
 """
-Common methods implemented by all Pong games
+Common methods implemented by all Pong games.
 """
 
 from abc import ABC, abstractmethod
@@ -52,7 +52,7 @@ class BasePongGame(ABC):
         """
 
     @abstractmethod
-    def get_action_based_on_heuristic(self, randomness: float) -> int:
+    def get_state(self) -> List[float]:
         """
-        Gets the next action to take based on a heuristic.
+        Get the current state of the game.
         """

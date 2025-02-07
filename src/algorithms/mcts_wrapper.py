@@ -1,48 +1,61 @@
 # pylint: disable=invalid-name
 """
-MCTS related core functionality
+MCTS wrapper functionality that connects to the core MCTS class.
+This is the class accessed during gameplay.
 """
 
-import time
+import random
+import math
 from abc import ABC, abstractmethod
-from mcts import mcts, randomPolicy
+
+from src.algorithms.mcts import mcts
 from src.pong.base_game import BasePongGame
+from src.logger.logger import logger
+from src.algorithms.ppo import PPO
 
 
 class MCTS:
     """
-    MCTS wrapper class that internally accesses
-    https://github.com/pbsinclair42/MCTS
+    MCTS wrapper class that is called when MCTS functionality needs to be accessed
+    during gameplay. It internally accesses core MCTS functionality.
     """
 
-    def __init__(self, iteration_limit=None, time_limit=None, heuristic: bool = False):
-        print("heuristic------------------->", heuristic)
+    def __init__(
+        self,
+        iteration_limit=100,
+        time_limit=None,
+        ppo_agent: PPO = None,
+    ):
+        self.ppo_agent = ppo_agent
+        rolloutPolicy = self.random_rollout
+        if ppo_agent:
+            rolloutPolicy = self.random_rollout
+            logger.info("using random rollout policy with ppo")
+
         self.searcher = mcts(
             iterationLimit=iteration_limit,
             timeLimit=time_limit,
-            explorationConstant=0.3,
-            rolloutPolicy=MCTS.heuristic_rollout if heuristic else randomPolicy,
+            explorationConstant=math.sqrt(2),
+            rolloutPolicy=rolloutPolicy,
+            ppo_agent=ppo_agent,
         )
 
-    @staticmethod
-    def heuristic_rollout(state: "MCTS.MCTSState", max_depth=None):
+    def random_rollout(self, state: "MCTS.MCTSState"):
         """
-        Rollout a state using a heuristic policy
+        Rollout a state using a random policy
         """
-        depth = 0
         while not state.isTerminal():
-            if max_depth and depth >= max_depth:
-                break
-            depth += 1
-            chosen_action = state.getGame().get_action_based_on_heuristic(
-                randomness=0.1
-            )
+
+            chosen_action = random.choice(state.getPossibleActions())
             state = state.takeAction(chosen_action)
+
         return state.getReward()
 
     class MCTSState(ABC):
         """
-        This class exposes state details in the format needed by https://github.com/pbsinclair42/MCTS
+        This class exposes state details in the format needed by https://github.com/pbsinclair42/MCTS.
+        It is essentially an interface that is needed to be accessed by the core MCTS functionality.
+        In the case of Pong games, pong/mcts_pong_state.py contains an implementation of this interface.
         """
 
         @abstractmethod
@@ -79,4 +92,10 @@ class MCTS:
         def getReward(self):
             """
             Get reward
+            """
+
+        @abstractmethod
+        def getState(self):
+            """
+            Get the current state of the game.
             """

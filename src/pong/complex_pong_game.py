@@ -2,7 +2,6 @@
 """
 Functionality for combining the various parts of the Complex Pong game
 """
-import copy
 from typing import List, Tuple
 import pygame
 from src.pong import constants
@@ -54,7 +53,7 @@ class ComplexPongGame(BasePongGame):
         self.obstacle.reset()
         self.reward = 0
         self.done = False
-        return self._get_state()
+        return self.get_state()
 
     def step(self, action: int) -> Tuple[List, float, bool]:
         """
@@ -100,7 +99,7 @@ class ComplexPongGame(BasePongGame):
             case _:
                 raise ValueError(f"Invalid action: {action}")
         self.update()
-        next_state = self._get_state()
+        next_state = self.get_state()
 
         return next_state, self.reward, self.done
 
@@ -117,22 +116,23 @@ class ComplexPongGame(BasePongGame):
 
     def update_reward(self, reward: float):
         """Update the reward based on the reward received or the default reward."""
-        if not reward and self.reward_frequency == constants.FREQUENCY_FREQUENT:
+        if not reward:
             reward = self.get_default_reward()
         self.reward = reward
 
     def get_default_reward(self) -> float:
         """Get the default reward for an action."""
-
-        return 1 - (
-            min(
-                abs(self.ball.position.centerx - self.paddle1.position.centerx),
-                abs(self.ball.position.centerx - self.paddle2.position.centerx),
+        if self.reward_frequency == constants.FREQUENCY_FREQUENT:
+            return 1 - (
+                min(
+                    abs(self.ball.position.centerx - self.paddle1.position.centerx),
+                    abs(self.ball.position.centerx - self.paddle2.position.centerx),
+                )
+                / constants.SCREEN_WIDTH
             )
-            / constants.SCREEN_WIDTH
-        )
+        return 0
 
-    def _get_state(self) -> List[float]:
+    def get_state(self) -> List[float]:
         """
         Get the current state of the game.
 
@@ -200,7 +200,7 @@ class ComplexPongGame(BasePongGame):
                 self.reset()
 
     def clone(self) -> "ComplexPongGame":
-        """Create a deep copy of the current game instance."""
+        """Create a copy of the current game instance."""
         new_game = ComplexPongGame(True, self.reward_frequency)
         new_game.paddle1 = self.paddle1.copy()
         new_game.paddle2 = self.paddle2.copy()
@@ -209,31 +209,3 @@ class ComplexPongGame(BasePongGame):
         new_game.reward = self.reward
         new_game.done = self.done
         return new_game
-
-    def get_action_based_on_heuristic(self, randomness=0.1) -> int:
-        """
-        Gets the action to take based on the relative position of the
-        ball and paddles.
-        """
-        if self.ball.position.centerx < self.paddle1.position.left:
-            return constants.COMPLEX_PONG_ACTION_PADDLE1_LEFT_PADDLE2_STAY
-        if (
-            self.ball.position.centerx >= self.paddle1.position.left
-            and self.ball.position.centerx <= self.paddle1.position.right
-        ):
-            return constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_STAY
-        if (
-            self.ball.position.centerx > self.paddle1.position.right
-            and self.ball.position.centerx < self.paddle2.position.left
-        ):
-            return constants.COMPLEX_PONG_ACTION_PADDLE1_RIGHT_PADDLE2_LEFT
-        if (
-            self.ball.position.centerx >= self.paddle2.position.left
-            and self.ball.position.centerx <= self.paddle2.position.right
-        ):
-            return constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_STAY
-
-        if self.ball.position.centerx > self.paddle2.position.right:
-            return constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_RIGHT
-
-        return constants.COMPLEX_PONG_ACTION_PADDLE1_STAY_PADDLE2_STAY

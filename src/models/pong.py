@@ -1,6 +1,6 @@
 # pylint: disable=missing-class-docstring
 """
-Models related to the pong game
+Models related to Pong games
 """
 from enum import Enum
 from typing import Tuple

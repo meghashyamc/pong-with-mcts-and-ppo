@@ -1,12 +1,12 @@
 """
-Constants related to training
+Constants related to training PPO/PPO-MCTS.
 """
 
 from src.pong import constants
 
 ARG_REWARD_FREQUENCY = "reward_frequency"
 ARG_RENDER = "render"
-ARG_MCTS_HEURISTIC = "heuristic"
+ARG_PPO = "ppo"
 ARG_PLOT = "plot"
 
 USE_MCTS = "mcts"
@@ -17,6 +17,9 @@ CSV_COLUMN_TIME = "Time (seconds)"
 CSV_COLUMN_REWARD = "Average Reward"
 CSV_COLUMN_PADDLE_HITS = "Average Paddle Hits"
 
+IMITATION_LOSS_WEIGHT_SIMPLE_PONG = 0.1
+IMITATION_LOSS_WEIGHT_COMPLEX_PONG = 0.03
+
 STATE_DIMS = {
     constants.ENV_SIMPLE_PONG: 5,
     constants.ENV_COMPLEX_PONG: 7,
@@ -25,6 +28,11 @@ STATE_DIMS = {
 ACTION_DIMS = {
     constants.ENV_SIMPLE_PONG: 3,
     constants.ENV_COMPLEX_PONG: 9,
+}
+
+IMITATION_LOSS_WEIGHTS = {
+    constants.ENV_SIMPLE_PONG: IMITATION_LOSS_WEIGHT_SIMPLE_PONG,
+    constants.ENV_COMPLEX_PONG: IMITATION_LOSS_WEIGHT_COMPLEX_PONG,
 }
 
 
@@ -37,12 +45,10 @@ GAMMA = 0.99  # discount factor
 LR_ACTOR = 0.0003  # learning rate for actor network
 LR_CRITIC = 0.0003  # learning rate for critic network
 WINDOW_SIZE = 100  # Number of episodes to average over for various metrics
-WINDOW_SIZE_FOR_MCTS = (
-    300  # Number of episodes to average over for considering or not considering MCTS
-)
+
+
 PADDLE_HITS_THRESHOLD = 100  # Number of paddles hits to consider the environment solved
 
-PPO_PERCENTAGE_THRESHOLD = 0.95
 
 LENGTH_PPO_CHOICE_HISTORY = 100
-FIELD_PPO_CHOICE_HISTORY = "ppo_choice_history"
+DUMMY_ACTION = -1

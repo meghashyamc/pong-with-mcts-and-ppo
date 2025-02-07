@@ -1,6 +1,8 @@
 # pylint: disable=no-member
 """
-Functionality related to various game objects
+Functionality related to various game objects.
+These objects can be used in other games - here they are specifically
+using by Simple/Complex Pong games.
 """
 
 import random
