@@ -1,4 +1,7 @@
-# Code Readme
+# Readme
+
+The `docs` folder has more context and images. Essentially,
+this is an attempt to compare the performance of Proximal Policy Optimization (PPO) and Monte Carlo Tree Search (MCTS) individually  with PPO-MCTS (PPO combined with MCTS) in playing simple and complex Pong games.
 
 ## Components of the Code
 
